@@ -87,7 +87,7 @@ public class BuildWorker {
   private String cveListingFileName;
 
   public BuildWorker(Run<?, ?> build, FilePath workspace, Launcher launcher, TaskListener listener, BuildConfig config)
-      throws AbortException {
+          throws AbortException {
     try {
       // Initialize build
       this.build = build;
@@ -109,8 +109,8 @@ public class BuildWorker {
       } else {
         LOG.warning("Anchore Container Image Scanner cannot find the required configuration");
         throw new AbortException(
-            "Configuration for the plugin is invalid. Configure the plugin under Manage Jenkins->Configure System->Anchore "
-                + "Configuration first. Add the Anchore Container Image Scanner step in your project and retry");
+                "Configuration for the plugin is invalid. Configure the plugin under Manage Jenkins->Configure System->Anchore "
+                        + "Configuration first. Add the Anchore Container Image Scanner step in your project and retry");
       }
 
       // Initialize build logger to log output to consoleLog, use local logging methods only after this initializer completes
@@ -172,21 +172,17 @@ public class BuildWorker {
     if (verify) {
       httpclient = HttpClients.createDefault();
     } else {
-      //SSLContextBuilder builder;
-
-      //SSLConnectionSocketFactory sslsf=null;
-
       try {
         SSLContextBuilder builder = new SSLContextBuilder();
         builder.loadTrustMaterial(null, new TrustSelfSignedStrategy());
         SSLConnectionSocketFactory sslsf = new SSLConnectionSocketFactory(builder.build(),
-            SSLConnectionSocketFactory.ALLOW_ALL_HOSTNAME_VERIFIER);
+                SSLConnectionSocketFactory.ALLOW_ALL_HOSTNAME_VERIFIER);
         httpclient = HttpClients.custom().setSSLSocketFactory(sslsf).build();
       } catch (Exception e) {
         System.out.println(e);
       }
     }
-    return (httpclient);
+    return httpclient;
   }
 
   private void runAnalyzerEngine() throws AbortException {
@@ -214,7 +210,7 @@ public class BuildWorker {
           String theurl = config.getEngineurl().replaceAll("/+$", "") + "/images";
 
           // Disable autosubscribe if necessary
-          if (!config.getAutoSubscribeTagUpdates()){
+          if (!config.getAutoSubscribeTagUpdates()) {
             queryList.add("autosubscribe=false");
           }
 
@@ -223,7 +219,7 @@ public class BuildWorker {
             queryList.add("force=true");
           }
 
-          if (!queryList.isEmpty()){
+          if (!queryList.isEmpty()) {
             queryStr = Joiner.on('&').skipNulls().join(queryList);
           }
 
@@ -259,10 +255,10 @@ public class BuildWorker {
             if (statusCode != 200) {
               String serverMessage = EntityUtils.toString(response.getEntity());
               console.logError(
-                  "anchore-engine add image failed. URL: " + theurl + ", status: " + response.getStatusLine() + ", error: "
-                      + serverMessage);
+                      "anchore-engine add image failed. URL: " + theurl + ", status: " + response.getStatusLine() + ", error: "
+                              + serverMessage);
               throw new AbortException("Failed to analyze " + tag
-                  + " due to error adding image to anchore-engine. Check above logs for errors from anchore-engine");
+                      + " due to error adding image to anchore-engine. Check above logs for errors from anchore-engine");
             } else {
               // Read the response body.
               String responseBody = EntityUtils.toString(response.getEntity());
@@ -285,12 +281,34 @@ public class BuildWorker {
     } catch (Exception e) { // caught unknown exception, log it and wrap its
       console.logError("Failed to add image(s) to anchore-engine due to an unexpected error", e);
       throw new AbortException(
-          "Failed to add image(s) to anchore-engine due to an unexpected error. Please refer to above logs for more information");
+              "Failed to add image(s) to anchore-engine due to an unexpected error. Please refer to above logs for more information");
     }
   }
 
   public GATE_ACTION runGates() throws AbortException {
     return runGatesEngine();
+  }
+
+  private String getAnalysisStatus(String imageTag) throws IOException {
+    String analysisStatus = "Unknown";
+    String url = new StringBuilder()
+            .append(config.getEngineurl().replaceAll("/+$", ""))
+            .append("/images?fulltag=")
+            .append(imageTag)
+            .append("&history=false")
+            .toString();
+    HttpGet httpGet = new HttpGet(url);
+    httpGet.addHeader("Content-Type", "application/json");
+    HttpClientContext context = makeHttpClientContext();
+    try (CloseableHttpClient httpclient = makeHttpClient(config.getEngineverify())) {
+      try (CloseableHttpResponse res = httpclient.execute(httpGet, context)) {
+        if (res.getStatusLine().getStatusCode() == 200) {
+          JSONArray resData = JSONArray.fromObject(EntityUtils.toString(res.getEntity()));
+          analysisStatus = JSONObject.fromObject(resData.get(0)).getString("analysis_status");
+        }
+      }
+    }
+    return analysisStatus;
   }
 
   private GATE_ACTION runGatesEngine() throws AbortException {
@@ -311,7 +329,6 @@ public class BuildWorker {
     if (analyzed) {
       try {
         JSONObject gate_results = new JSONObject();
-
         for (Map.Entry<String, String> entry : input_image_imageDigest.entrySet()) {
           String tag = entry.getKey();
           String imageDigest = entry.getValue();
@@ -319,19 +336,10 @@ public class BuildWorker {
           console.logInfo("Waiting for analysis of " + tag + ", polling status periodically");
 
           Boolean anchore_eval_status = false;
-          String theurl =
-              config.getEngineurl().replaceAll("/+$", "") + "/images/" + imageDigest + "/check?tag=" + tag + "&detail=true";
-
-          if (!Strings.isNullOrEmpty(config.getPolicyBundleId())) {
-            theurl += "&policyId=" + config.getPolicyBundleId();
-          }
-          console.logDebug("anchore-engine get policy evaluation URL: " + theurl);
 
           int tryCount = 0;
           int maxCount = Integer.parseInt(config.getEngineRetries());
           Boolean done = false;
-          HttpGet httpget = new HttpGet(theurl);
-          httpget.addHeader("Content-Type", "application/json");
           int statusCode;
           String serverMessage = null;
           boolean sleep = false;
@@ -339,94 +347,98 @@ public class BuildWorker {
           do { // try this at least once regardless what the retry count is
             if (sleep) {
               console.logDebug("Snoozing before retrying anchore-engine get policy evaluation");
-              Thread.sleep(1000);
+              Thread.sleep(10000);
               sleep = false;
             }
 
             tryCount++;
             try (CloseableHttpClient httpclient = makeHttpClient(sslverify)) {
               console.logDebug("Attempting anchore-engine get policy evaluation (" + tryCount + "/" + maxCount + ")");
+              String analysisStatus = getAnalysisStatus(tag);
+              console.logInfo("Analysis status of " + tag + " is: " + analysisStatus);
+              if ("not_analyzed".equals(analysisStatus) || "analyzing".equals(analysisStatus)) {
+                console.logInfo("Waiting 10 seconds for next retry...");
+                sleep = true;
+                continue;
+              } else {
+                done = true;
+                String theurl =
+                        config.getEngineurl().replaceAll("/+$", "") + "/images/" + imageDigest + "/check?tag=" + tag + "&detail=true";
 
-              try (CloseableHttpResponse response = httpclient.execute(httpget, context)) {
-                statusCode = response.getStatusLine().getStatusCode();
-
-                if (statusCode != 200) {
-                  serverMessage = EntityUtils.toString(response.getEntity());
-                  console.logDebug(
-                      "anchore-engine get policy evaluation failed. URL: " + theurl + ", status: " + response.getStatusLine()
-                          + ", error: " + serverMessage);
-                  // Thread.sleep(1000); sleeping here keeps connection open. Unnecessary if the retries have been exhausted
-                  sleep = true;
-                } else {
-                  // Read the response body.
-                  String responseBody = EntityUtils.toString(response.getEntity());
-                  // TODO EntityUtils.consume(entity2);
-                  JSONArray respJson = JSONArray.fromObject(responseBody);
-                  JSONObject tag_eval_obj = JSONObject.fromObject(JSONArray.fromObject(
-                      JSONArray.fromObject(JSONObject.fromObject(JSONObject.fromObject(respJson.get(0)).getJSONObject(imageDigest))))
-                      .get(0));
-                  JSONArray tag_evals = null;
-                  for (Object key : tag_eval_obj.keySet()) {
-                    tag_evals = tag_eval_obj.getJSONArray((String) key);
-                    break;
-                  }
-                  //JSONArray tag_evals = JSONObject.fromObject(JSONArray.fromObject(JSONArray.fromObject(JSONObject.fromObject
-                  // (JSONObject.fromObject(respJson.get(0)).getJSONObject(imageDigest)))).get(0)).getJSONArray(tag);
-                  if (null == tag_evals) {
+                if (!Strings.isNullOrEmpty(config.getPolicyBundleId())) {
+                  theurl += "&policyId=" + config.getPolicyBundleId();
+                }
+                console.logDebug("anchore-engine get policy evaluation URL: " + theurl);
+                HttpGet httpget = new HttpGet(theurl);
+                httpget.addHeader("Content-Type", "application/json");
+                try (CloseableHttpResponse response = httpclient.execute(httpget, context)) {
+                  statusCode = response.getStatusLine().getStatusCode();
+                  if (statusCode != 200) {
+                    serverMessage = EntityUtils.toString(response.getEntity());
                     throw new AbortException(
-                        "Failed to analyze " + tag + " due to missing tag eval records in anchore-engine policy evaluation response");
-                  }
-                  if (tag_evals.size() < 1) {
-                    // try again until we get an eval
-                    console
-                        .logDebug("anchore-engine get policy evaluation response contains no tag eval records. May snooze and retry");
-                    // Thread.sleep(1000); sleeping here keeps connection open. Unnecessary if the retries have been exhausted
-                    sleep = true;
+                            "Get policy evaluation failed. URL: " + theurl + ", status: " + response.getStatusLine()
+                                    + ", error: " + serverMessage);
                   } else {
-                    // String eval_status = JSONObject.fromObject(JSONObject.fromObject(tag_evals.get(0)).getJSONArray(tag).get(0))
-                    // .getString("status");
-                    String eval_status = JSONObject.fromObject(JSONObject.fromObject(tag_evals.get(0))).getString("status");
-                    JSONObject gate_result = JSONObject.fromObject(JSONObject.fromObject(
-                        JSONObject.fromObject(JSONObject.fromObject(tag_evals.get(0)).getJSONObject("detail")).getJSONObject("result"))
-                        .getJSONObject("result"));
+                    // Read the response body.
+                    String responseBody = EntityUtils.toString(response.getEntity());
+                    // TODO EntityUtils.consume(entity2);
+                    JSONArray respJson = JSONArray.fromObject(responseBody);
+                    JSONObject tag_eval_obj = JSONObject.fromObject(JSONArray.fromObject(
+                            JSONArray.fromObject(JSONObject.fromObject(JSONObject.fromObject(respJson.get(0)).getJSONObject(imageDigest))))
+                            .get(0));
+                    JSONArray tag_evals = null;
+                    for (Object key : tag_eval_obj.keySet()) {
+                      tag_evals = tag_eval_obj.getJSONArray((String) key);
+                      break;
+                    }
+                    //JSONArray tag_evals = JSONObject.fromObject(JSONArray.fromObject(JSONArray.fromObject(JSONObject.fromObject
+                    // (JSONObject.fromObject(respJson.get(0)).getJSONObject(imageDigest)))).get(0)).getJSONArray(tag);
+                    if (null == tag_evals) {
+                      throw new AbortException(
+                              "Failed to analyze " + tag + " due to missing tag eval records in anchore-engine policy evaluation response");
+                    }
+                    if (tag_evals.size() < 1) {
+                      // try again until we get an eval
+                      console
+                              .logDebug("anchore-engine get policy evaluation response contains no tag eval records. May snooze and retry");
+                      // Thread.sleep(1000); sleeping here keeps connection open. Unnecessary if the retries have been exhausted
+                      sleep = true;
+                    } else {
+                      // String eval_status = JSONObject.fromObject(JSONObject.fromObject(tag_evals.get(0)).getJSONArray(tag).get(0))
+                      // .getString("status");
+                      String eval_status = JSONObject.fromObject(JSONObject.fromObject(tag_evals.get(0))).getString("status");
+                      JSONObject gate_result = JSONObject.fromObject(JSONObject.fromObject(
+                              JSONObject.fromObject(JSONObject.fromObject(tag_evals.get(0)).getJSONObject("detail")).getJSONObject("result"))
+                              .getJSONObject("result"));
 
-                    console.logDebug("anchore-engine get policy evaluation status: " + eval_status);
-                    console.logDebug("anchore-engine get policy evaluation result: " + gate_result.toString());
-                    for (Object key : gate_result.keySet()) {
-                      try {
-                        gate_results.put((String) key, gate_result.getJSONObject((String) key));
-                      } catch (Exception e) {
-                        console.logDebug("Ignoring error parsing policy evaluation result key: " + key);
+                      console.logDebug("anchore-engine get policy evaluation status: " + eval_status);
+                      console.logDebug("anchore-engine get policy evaluation result: " + gate_result.toString());
+                      for (Object key : gate_result.keySet()) {
+                        try {
+                          gate_results.put((String) key, gate_result.getJSONObject((String) key));
+                        } catch (Exception e) {
+                          console.logDebug("Ignoring error parsing policy evaluation result key: " + key);
+                        }
                       }
-                    }
 
-                    // we actually got a real result
-                    // this is the only way this gets flipped to true
-                    if (eval_status.equals("pass")) {
-                      anchore_eval_status = true;
+                      // we actually got a real result
+                      // this is the only way this gets flipped to true
+                      if (eval_status.equals("pass")) {
+                        anchore_eval_status = true;
+                      }
+                      console.logInfo("Completed analysis and processed policy evaluation result");
                     }
-                    done = true;
-                    console.logInfo("Completed analysis and processed policy evaluation result");
                   }
                 }
-              } catch (Throwable e) {
-                throw e;
               }
-            } catch (Throwable e) {
-              throw e;
             }
           } while (!done && tryCount < maxCount);
 
           if (!done) {
-            if (statusCode != 200) {
-              console.logWarn(
-                  "anchore-engine get policy evaluation failed. HTTP method: GET, URL: " + theurl + ", status: " + statusCode
-                      + ", error: " + serverMessage);
-            }
             console.logWarn("Exhausted all attempts polling anchore-engine. Analysis is incomplete for " + imageDigest);
             throw new AbortException(
-                "Timed out waiting for anchore-engine analysis to complete (increasing engineRetries might help). Check above logs "
-                    + "for errors from anchore-engine");
+                    "Timed out waiting for anchore-engine analysis to complete (increasing engineRetries might help). Check above logs "
+                            + "for errors from anchore-engine");
           } else {
             // only set to stop if an eval is successful and is reporting fail
             if (!anchore_eval_status) {
@@ -453,16 +465,15 @@ public class BuildWorker {
       } catch (Exception e) { // caught unknown exception, log it and wrap it
         console.logError("Failed to execute anchore-engine policy evaluation due to an unexpected error", e);
         throw new AbortException(
-            "Failed to execute anchore-engine policy evaluation due to an unexpected error. Please refer to above logs for more "
-                + "information");
+                "Failed to execute anchore-engine policy evaluation due to an unexpected error. Please refer to above logs for more "
+                        + "information");
       }
     } else {
       console.logError(
-          "Image(s) were not added to anchore-engine (or a prior attempt to add images may have failed). Re-submit image(s) to "
-              + "anchore-engine before attempting policy evaluation");
+              "Image(s) were not added to anchore-engine (or a prior attempt to add images may have failed). Re-submit image(s) to "
+                      + "anchore-engine before attempting policy evaluation");
       throw new AbortException("Submit image(s) to anchore-engine for analysis before attempting policy evaluation");
     }
-
   }
 
   private void runVulnerabilityListing() throws AbortException {
@@ -502,8 +513,8 @@ public class BuildWorker {
               if (statusCode != 200) {
                 String serverMessage = EntityUtils.toString(response.getEntity());
                 console.logWarn(
-                    "anchore-engine get vulnerability listing failed. URL: " + theurl + ", status: " + response.getStatusLine()
-                        + ", error: " + serverMessage);
+                        "anchore-engine get vulnerability listing failed. URL: " + theurl + ", status: " + response.getStatusLine()
+                                + ", error: " + serverMessage);
                 throw new AbortException("Failed to fetch vulnerability listing from anchore-engine");
               } else {
                 String responseBody = EntityUtils.toString(response.getEntity());
@@ -513,9 +524,9 @@ public class BuildWorker {
                   JSONObject vulnJson = vulList.getJSONObject(i);
                   JSONArray vulnArray = new JSONArray();
                   vulnArray.addAll(Arrays
-                      .asList(input, vulnJson.getString("vuln"), vulnJson.getString("severity"), vulnJson.getString("package"),
-                          vulnJson.getString("fix"),
-                          "<a href='" + vulnJson.getString("url") + "'>" + vulnJson.getString("url") + "</a>"));
+                          .asList(input, vulnJson.getString("vuln"), vulnJson.getString("severity"), vulnJson.getString("package"),
+                                  vulnJson.getString("fix"),
+                                  "<a href='" + vulnJson.getString("url") + "'>" + vulnJson.getString("url") + "</a>"));
                   dataJson.add(vulnArray);
                 }
               }
@@ -546,13 +557,13 @@ public class BuildWorker {
       } catch (Exception e) { // caught unknown exception, log it and wrap it
         console.logError("Failed to fetch vulnerability listing from anchore-engine due to an unexpected error", e);
         throw new AbortException(
-            "Failed to fetch vulnerability listing from anchore-engine due to an unexpected error. Please refer to above logs for "
-                + "more information");
+                "Failed to fetch vulnerability listing from anchore-engine due to an unexpected error. Please refer to above logs for "
+                        + "more information");
       }
     } else {
       console.logError(
-          "Image(s) were not added to anchore-engine (or a prior attempt to add images may have failed). Re-submit image(s) to "
-              + "anchore-engine before attempting vulnerability listing");
+              "Image(s) were not added to anchore-engine (or a prior attempt to add images may have failed). Re-submit image(s) to "
+                      + "anchore-engine before attempting vulnerability listing");
       throw new AbortException("Submit image(s) to anchore-engine for analysis before attempting vulnerability listing");
     }
   }
@@ -602,7 +613,7 @@ public class BuildWorker {
 
             if (numColumns <= 0 || repoTagIndex < 0 || gateNameIndex < 0 || gateActionIndex < 0) {
               console.logWarn("Either \'header\' element has no columns or column indices (for Repo_Tag, Gate, Gate_Action) not "
-                  + "initialized, skipping summary computation for " + imageKey);
+                      + "initialized, skipping summary computation for " + imageKey);
               continue;
             }
 
@@ -622,17 +633,17 @@ public class BuildWorker {
                       case "stop":
                         stop++;
                         stop_wl = (whitelistedIndex != -1 && !(row.getString(whitelistedIndex).equalsIgnoreCase("none") || row
-                            .getString(whitelistedIndex).equalsIgnoreCase("false"))) ? ++stop_wl : stop_wl;
+                                .getString(whitelistedIndex).equalsIgnoreCase("false"))) ? ++stop_wl : stop_wl;
                         break;
                       case "warn":
                         warn++;
                         warn_wl = (whitelistedIndex != -1 && !(row.getString(whitelistedIndex).equalsIgnoreCase("none") || row
-                            .getString(whitelistedIndex).equalsIgnoreCase("false"))) ? ++warn_wl : warn_wl;
+                                .getString(whitelistedIndex).equalsIgnoreCase("false"))) ? ++warn_wl : warn_wl;
                         break;
                       case "go":
                         go++;
                         go_wl = (whitelistedIndex != -1 && !(row.getString(whitelistedIndex).equalsIgnoreCase("none") || row
-                            .getString(whitelistedIndex).equalsIgnoreCase("false"))) ? ++go_wl : go_wl;
+                                .getString(whitelistedIndex).equalsIgnoreCase("false"))) ? ++go_wl : go_wl;
                         break;
                       default:
                         break;
@@ -640,18 +651,18 @@ public class BuildWorker {
                   }
                 } else {
                   console.logWarn("Expected " + numColumns + " elements but got " + row.size() + ", skipping row " + row
-                      + " in summary computation for " + imageKey);
+                          + " in summary computation for " + imageKey);
                 }
               }
 
               totalStopActionCount += (stop - stop_wl);
               totalWarnActionCount += (warn - warn_wl);
               totalGoActionCount += (go - go_wl);
-              
+
               if (!Strings.isNullOrEmpty(repoTag)) {
                 console.logInfo("Policy evaluation summary for " + repoTag + " - stop: " + (stop - stop_wl) + " (+" + stop_wl
-                    + " whitelisted), warn: " + (warn - warn_wl) + " (+" + warn_wl + " whitelisted), go: " + (go - go_wl) + " (+"
-                    + go_wl + " whitelisted), final: " + result.getString("final_action"));
+                        + " whitelisted), warn: " + (warn - warn_wl) + " (+" + warn_wl + " whitelisted), go: " + (go - go_wl) + " (+"
+                        + go_wl + " whitelisted), final: " + result.getString("final_action"));
 
                 JSONObject summaryRow = new JSONObject();
                 summaryRow.put(GATE_SUMMARY_COLUMN.Repo_Tag.toString(), repoTag);
@@ -662,8 +673,8 @@ public class BuildWorker {
                 summaryRows.add(summaryRow);
               } else {
                 console.logInfo("Policy evaluation summary for " + imageKey + " - stop: " + (stop - stop_wl) + " (+" + stop_wl
-                    + " whitelisted), warn: " + (warn - warn_wl) + " (+" + warn_wl + " whitelisted), go: " + (go - go_wl) + " (+"
-                    + go_wl + " whitelisted), final: " + result.getString("final_action"));
+                        + " whitelisted), warn: " + (warn - warn_wl) + " (+" + warn_wl + " whitelisted), go: " + (go - go_wl) + " (+"
+                        + go_wl + " whitelisted), final: " + result.getString("final_action"));
                 JSONObject summaryRow = new JSONObject();
                 summaryRow.put(GATE_SUMMARY_COLUMN.Repo_Tag.toString(), imageKey.toString());
                 summaryRow.put(GATE_SUMMARY_COLUMN.Stop_Actions.toString(), (stop - stop_wl));
@@ -715,20 +726,20 @@ public class BuildWorker {
       // add the link in jenkins UI for anchore results
       console.logDebug("Setting up build results");
 
-      
+
       if (finalAction != null) {
         build.addAction(new AnchoreAction(build, finalAction.toString(), jenkinsOutputDirName, gateOutputFileName, queryOutputMap,
-            gateSummary.toString(), cveListingFileName, totalStopActionCount, totalWarnActionCount, totalGoActionCount));
+                gateSummary.toString(), cveListingFileName, totalStopActionCount, totalWarnActionCount, totalGoActionCount));
       } else {
         build.addAction(new AnchoreAction(build, "", jenkinsOutputDirName, gateOutputFileName, queryOutputMap, gateSummary.toString(),
-            cveListingFileName, totalStopActionCount, totalWarnActionCount, totalGoActionCount));
+                cveListingFileName, totalStopActionCount, totalWarnActionCount, totalGoActionCount));
       }
       //    } catch (AbortException e) { // probably caught one of the thrown exceptions, let it pass through
       //      throw e;
     } catch (Exception e) { // caught unknown exception, log it and wrap it
       console.logError("Failed to setup build results due to an unexpected error", e);
       throw new AbortException(
-          "Failed to setup build results due to an unexpected error. Please refer to above logs for more information");
+              "Failed to setup build results due to an unexpected error. Please refer to above logs for more information");
     }
   }
 
@@ -760,10 +771,10 @@ public class BuildWorker {
     console.logInfo("Jenkins version: " + Jenkins.VERSION);
     List<PluginWrapper> plugins;
     if (Jenkins.getActiveInstance() != null && Jenkins.getActiveInstance().getPluginManager() != null
-        && (plugins = Jenkins.getActiveInstance().getPluginManager().getPlugins()) != null) {
+            && (plugins = Jenkins.getActiveInstance().getPluginManager().getPlugins()) != null) {
       for (PluginWrapper plugin : plugins) {
         if (plugin.getShortName()
-            .equals("anchore-container-scanner")) { // artifact ID of the plugin, TODO is there a better way to get this
+                .equals("anchore-container-scanner")) { // artifact ID of the plugin, TODO is there a better way to get this
           console.logInfo(plugin.getDisplayName() + " version: " + plugin.getVersion());
           break;
         }
@@ -779,22 +790,22 @@ public class BuildWorker {
     if (Strings.isNullOrEmpty(config.getName())) {
       console.logError("Image list file not found");
       throw new AbortException(
-          "Image list file not specified. Please provide a valid image list file name in the Anchore Container Image Scanner step "
-              + "and try again");
+              "Image list file not specified. Please provide a valid image list file name in the Anchore Container Image Scanner step "
+                      + "and try again");
     }
 
     try {
       if (!new FilePath(workspace, config.getName()).exists()) {
         console.logError("Cannot find image list file \"" + config.getName() + "\" under " + workspace);
         throw new AbortException("Cannot find image list file \'" + config.getName()
-            + "\'. Please ensure that image list file is created prior to Anchore Container Image Scanner step");
+                + "\'. Please ensure that image list file is created prior to Anchore Container Image Scanner step");
       }
     } catch (AbortException e) {
       throw e;
     } catch (Exception e) {
       console.logWarn("Unable to access image list file \"" + config.getName() + "\" under " + workspace, e);
       throw new AbortException("Unable to access image list file " + config.getName()
-          + ". Please ensure that image list file is created prior to Anchore Container Image Scanner step");
+              + ". Please ensure that image list file is created prior to Anchore Container Image Scanner step");
     }
   }
 
@@ -879,7 +890,7 @@ public class BuildWorker {
     } catch (Exception e) { // caught unknown exception, console.log it and wrap it
       console.logError("Failed to initialize Anchore workspace due to an unexpected error", e);
       throw new AbortException(
-          "Failed to initialize Anchore workspace due to an unexpected error. Please refer to above logs for more information");
+              "Failed to initialize Anchore workspace due to an unexpected error. Please refer to above logs for more information");
     }
   }
 
@@ -892,6 +903,72 @@ public class BuildWorker {
       headers.add(header);
     }
     return headers;
+  }
+
+  private int executeAnchoreCommand(String cmd, String... envOverrides) throws AbortException {
+    return executeAnchoreCommand(cmd, config.getDebug() ? console.getLogger() : null, console.getLogger(), envOverrides);
+  }
+
+  private int executeAnchoreCommand(String cmd, OutputStream out, String... envOverrides) throws AbortException {
+    return executeAnchoreCommand(cmd, out, console.getLogger(), envOverrides);
+  }
+
+  /**
+   * Helper for executing Anchore CLI. Abstracts docker and debug options out for the caller
+   */
+  private int executeAnchoreCommand(String cmd, OutputStream out, OutputStream error, String... envOverrides) throws
+          AbortException {
+    String dockerCmd = "docker exec " + config.getContainerId() + " " + ANCHORE_BINARY;
+
+    if (config.getDebug()) {
+      dockerCmd += " --debug";
+    }
+
+    if (!Strings.isNullOrEmpty(anchoreScriptsDirName)) {
+      dockerCmd += " --config-override user_scripts_dir=" + anchoreScriptsDirName;
+    }
+
+    dockerCmd += " " + cmd;
+
+    return executeCommand(dockerCmd, out, error, envOverrides);
+  }
+
+  private int executeCommand(String cmd, String... envOverrides) throws AbortException {
+    // log stdout to console only if debug is turned on
+    // always log stderr to console
+    return executeCommand(cmd, config.getDebug() ? console.getLogger() : null, console.getLogger(), envOverrides);
+  }
+
+  private int executeCommand(String cmd, OutputStream out, OutputStream error, String... envOverrides) throws
+          AbortException {
+    int rc;
+
+    if (config.getUseSudo()) {
+      cmd = "sudo " + cmd;
+    }
+
+    Launcher.ProcStarter ps = launcher.launch();
+
+    ps.envs(envOverrides);
+    ps.cmdAsSingleString(cmd);
+    ps.stdin(null);
+    if (null != out) {
+      ps.stdout(out);
+    }
+    if (null != error) {
+      ps.stderr(error);
+    }
+
+    try {
+      console.logDebug("Executing \"" + cmd + "\"");
+      //ps.quiet(true);
+      rc = ps.join();
+      console.logDebug("Execution of \"" + cmd + "\" returned " + rc);
+      return rc;
+    } catch (Exception e) {
+      console.logWarn("Failed to execute \"" + cmd + "\"", e);
+      throw new AbortException("Failed to execute \"" + cmd + "\"");
+    }
   }
 
   private void cleanJenkinsWorkspaceQuietly() throws IOException, InterruptedException {
