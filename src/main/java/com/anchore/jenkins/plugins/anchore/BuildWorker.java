@@ -436,6 +436,9 @@ public class BuildWorker {
                 console.logInfo("Waiting 10 seconds for next retry...");
                 sleep = true;
                 continue;
+              } else if ("analysis_failed".equals(analysisStatus)) {
+                done = true;
+                console.logError("Failed to analysis the image");
               } else {
                 done = true;
                 String theurl =
