@@ -11,7 +11,7 @@ import java.util.logging.Logger;
 public class ConsoleLog {
 
   private static final Logger LOG = Logger.getLogger(ConsoleLog.class.getName());
-  private static final String LOG_FORMAT = "%1$tY-%1$tm-%1$tdT%1$tH:%1$tM:%1$tS.%1$tL %2$-6s %3$-15s %4$s";
+  private static final String LOG_FORMAT = "%1$-6s %2$s";
 
   private String name;
   private PrintStream logger;
@@ -38,7 +38,7 @@ public class ConsoleLog {
 
   public void logDebug(String msg) {
     if (enableDebug) {
-      logger.println(String.format(LOG_FORMAT, new Date(), "DEBUG", name, msg));
+      logger.println(String.format(LOG_FORMAT, "DEBUG", msg));
     }
   }
 
@@ -50,11 +50,11 @@ public class ConsoleLog {
   }
 
   public void logInfo(String msg) {
-    logger.println(String.format(LOG_FORMAT, new Date(), "INFO", name, msg));
+    logger.println(msg);
   }
 
   public void logWarn(String msg) {
-    logger.println(String.format(LOG_FORMAT, new Date(), "WARN", name, msg));
+    logger.println(String.format(LOG_FORMAT, "WARN", msg));
   }
 
   public void logWarn(String msg, Throwable t) {
@@ -65,7 +65,7 @@ public class ConsoleLog {
   }
 
   public void logError(String msg) {
-    logger.println(String.format(LOG_FORMAT, new Date(), "ERROR", name, msg));
+    logger.println(String.format(LOG_FORMAT, "ERROR", msg));
   }
 
   public void logError(String msg, Throwable t) {
