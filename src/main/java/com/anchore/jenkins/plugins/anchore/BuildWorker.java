@@ -202,14 +202,7 @@ public class BuildWorker {
 
   private void runAnalyzerEngine() throws AbortException {
     String imageDigest = null;
-    String username = config.getEngineuser();
-    String password = config.getEnginepass();
-    boolean sslverify = config.getEngineverify();
-
-    CredentialsProvider credsProvider = new BasicCredentialsProvider();
-    credsProvider.setCredentials(AuthScope.ANY, new UsernamePasswordCredentials(username, password));
-    HttpClientContext context = HttpClientContext.create();
-    context.setCredentialsProvider(credsProvider);
+    HttpClientContext context = makeHttpClientContext();
 
     try {
       for (Map.Entry<String, String> entry : input_image_dfile.entrySet()) {
@@ -220,7 +213,7 @@ public class BuildWorker {
 
         console.logInfo("Submitting " + tag + " for analysis");
 
-        try (CloseableHttpClient httpclient = makeHttpClient(sslverify)) {
+        try (CloseableHttpClient httpclient = makeHttpClient(config.getEngineverify())) {
           // Prep POST request
           String theurl = config.getEngineurl().replaceAll("/+$", "") + "/images";
 
@@ -304,6 +297,17 @@ public class BuildWorker {
     return runGatesEngine();
   }
 
+  private HttpClientContext makeHttpClientContext() {
+    String username = config.getEngineuser();
+    String password = config.getEnginepass();
+
+    CredentialsProvider credsProvider = new BasicCredentialsProvider();
+    credsProvider.setCredentials(AuthScope.ANY, new UsernamePasswordCredentials(username, password));
+    HttpClientContext context = HttpClientContext.create();
+    context.setCredentialsProvider(credsProvider);
+    return context;
+  }
+
   private String getAnalysisStatus(String imageTag) throws IOException {
     String analysisStatus = "Unknown";
     String url = new StringBuilder()
@@ -327,14 +331,7 @@ public class BuildWorker {
   }
 
   private GATE_ACTION runGatesEngine() throws AbortException {
-    String username = config.getEngineuser();
-    String password = config.getEnginepass();
-    boolean sslverify = config.getEngineverify();
-
-    CredentialsProvider credsProvider = new BasicCredentialsProvider();
-    credsProvider.setCredentials(AuthScope.ANY, new UsernamePasswordCredentials(username, password));
-    HttpClientContext context = HttpClientContext.create();
-    context.setCredentialsProvider(credsProvider);
+    HttpClientContext context = makeHttpClientContext();
 
     //Credentials defaultcreds = new UsernamePasswordCredentials(username, password);
     FilePath jenkinsOutputDirFP = new FilePath(workspace, jenkinsOutputDirName);
@@ -367,7 +364,7 @@ public class BuildWorker {
             }
 
             tryCount++;
-            try (CloseableHttpClient httpclient = makeHttpClient(sslverify)) {
+            try (CloseableHttpClient httpclient = makeHttpClient(config.getEngineverify())) {
               console.logDebug("Attempting anchore-engine get policy evaluation (" + tryCount + "/" + maxCount + ")");
               String analysisStatus = getAnalysisStatus(tag);
               console.logInfo("Analysis status of " + tag + " is: " + analysisStatus);
@@ -493,15 +490,7 @@ public class BuildWorker {
 
   private void runVulnerabilityListing() throws AbortException {
     if (analyzed) {
-      String username = config.getEngineuser();
-      String password = config.getEnginepass();
-      boolean sslverify = config.getEngineverify();
-
-      CredentialsProvider credsProvider = new BasicCredentialsProvider();
-      credsProvider.setCredentials(AuthScope.ANY, new UsernamePasswordCredentials(username, password));
-      HttpClientContext context = HttpClientContext.create();
-      context.setCredentialsProvider(credsProvider);
-
+      HttpClientContext context = makeHttpClientContext();
       try {
         JSONObject securityJson = new JSONObject();
         JSONArray columnsJson = new JSONArray();
@@ -516,7 +505,7 @@ public class BuildWorker {
           String input = entry.getKey();
           String digest = entry.getValue();
 
-          try (CloseableHttpClient httpclient = makeHttpClient(sslverify)) {
+          try (CloseableHttpClient httpclient = makeHttpClient(config.getEngineverify())) {
             console.logInfo("Querying vulnerability listing for " + input);
             String theurl = config.getEngineurl().replaceAll("/+$", "") + "/images/" + digest + "/vuln/all";
             HttpGet httpget = new HttpGet(theurl);
@@ -918,72 +907,6 @@ public class BuildWorker {
       headers.add(header);
     }
     return headers;
-  }
-
-  private int executeAnchoreCommand(String cmd, String... envOverrides) throws AbortException {
-    return executeAnchoreCommand(cmd, config.getDebug() ? console.getLogger() : null, console.getLogger(), envOverrides);
-  }
-
-  private int executeAnchoreCommand(String cmd, OutputStream out, String... envOverrides) throws AbortException {
-    return executeAnchoreCommand(cmd, out, console.getLogger(), envOverrides);
-  }
-
-  /**
-   * Helper for executing Anchore CLI. Abstracts docker and debug options out for the caller
-   */
-  private int executeAnchoreCommand(String cmd, OutputStream out, OutputStream error, String... envOverrides) throws
-          AbortException {
-    String dockerCmd = "docker exec " + config.getContainerId() + " " + ANCHORE_BINARY;
-
-    if (config.getDebug()) {
-      dockerCmd += " --debug";
-    }
-
-    if (!Strings.isNullOrEmpty(anchoreScriptsDirName)) {
-      dockerCmd += " --config-override user_scripts_dir=" + anchoreScriptsDirName;
-    }
-
-    dockerCmd += " " + cmd;
-
-    return executeCommand(dockerCmd, out, error, envOverrides);
-  }
-
-  private int executeCommand(String cmd, String... envOverrides) throws AbortException {
-    // log stdout to console only if debug is turned on
-    // always log stderr to console
-    return executeCommand(cmd, config.getDebug() ? console.getLogger() : null, console.getLogger(), envOverrides);
-  }
-
-  private int executeCommand(String cmd, OutputStream out, OutputStream error, String... envOverrides) throws
-          AbortException {
-    int rc;
-
-    if (config.getUseSudo()) {
-      cmd = "sudo " + cmd;
-    }
-
-    Launcher.ProcStarter ps = launcher.launch();
-
-    ps.envs(envOverrides);
-    ps.cmdAsSingleString(cmd);
-    ps.stdin(null);
-    if (null != out) {
-      ps.stdout(out);
-    }
-    if (null != error) {
-      ps.stderr(error);
-    }
-
-    try {
-      console.logDebug("Executing \"" + cmd + "\"");
-      //ps.quiet(true);
-      rc = ps.join();
-      console.logDebug("Execution of \"" + cmd + "\" returned " + rc);
-      return rc;
-    } catch (Exception e) {
-      console.logWarn("Failed to execute \"" + cmd + "\"", e);
-      throw new AbortException("Failed to execute \"" + cmd + "\"");
-    }
   }
 
   private void cleanJenkinsWorkspaceQuietly() throws IOException, InterruptedException {
