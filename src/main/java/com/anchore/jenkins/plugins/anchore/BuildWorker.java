@@ -66,6 +66,8 @@ public class BuildWorker {
   private static final String CVE_LISTING_PREFIX = "anchore_security";
   private static final String JENKINS_DIR_NAME_PREFIX = "AnchoreReport.";
   private static final String JSON_FILE_EXTENSION = ".json";
+  private static final String AE_VULNS_PREFIX = "anchoreengine-api-response-vulnerabilities-";
+  private static final String AE_EVAL_PREFIX = "anchoreengine-api-response-evaluation-";
 
   // Private members
   Run<?, ?> build;
@@ -197,7 +199,7 @@ public class BuildWorker {
         System.out.println(e);
       }
     }
-    return httpclient;
+    return (httpclient);
   }
 
   private void runAnalyzerEngine() throws AbortException {
@@ -336,6 +338,7 @@ public class BuildWorker {
     //Credentials defaultcreds = new UsernamePasswordCredentials(username, password);
     FilePath jenkinsOutputDirFP = new FilePath(workspace, jenkinsOutputDirName);
     FilePath jenkinsGatesOutputFP = new FilePath(jenkinsOutputDirFP, gateOutputFileName);
+    int counter = 0;
 
     finalAction = GATE_ACTION.PASS;
     if (analyzed) {
@@ -348,10 +351,19 @@ public class BuildWorker {
           console.logInfo("Waiting for analysis of " + tag + ", polling status periodically");
 
           Boolean anchore_eval_status = false;
+          String theurl =
+              config.getEngineurl().replaceAll("/+$", "") + "/images/" + imageDigest + "/check?tag=" + tag + "&detail=true";
+
+          if (!Strings.isNullOrEmpty(config.getPolicyBundleId())) {
+            theurl += "&policyId=" + config.getPolicyBundleId();
+          }
+          console.logDebug("anchore-engine get policy evaluation URL: " + theurl);
 
           int tryCount = 0;
           int maxCount = Integer.parseInt(config.getEngineRetries());
           Boolean done = false;
+          HttpGet httpget = new HttpGet(theurl);
+          httpget.addHeader("Content-Type", "application/json");
           int statusCode;
           String serverMessage = null;
           boolean sleep = false;
@@ -522,6 +534,19 @@ public class BuildWorker {
                 throw new AbortException("Failed to fetch vulnerability listing from anchore-engine");
               } else {
                 String responseBody = EntityUtils.toString(response.getEntity());
+                // Write api response to a file as it is
+                String jenkinsAEResponseFileName = AE_VULNS_PREFIX + (++counter) + JSON_FILE_EXTENSION;
+                FilePath jenkinsAEResponseFP = new FilePath(jenkinsOutputDirFP, jenkinsAEResponseFileName);
+                try {
+                  console.logDebug("Writing anchore-engine vulnerabilities listing response to " + jenkinsAEResponseFP.getRemote());
+                  try (BufferedWriter bw = new BufferedWriter(new OutputStreamWriter(jenkinsAEResponseFP.write(), StandardCharsets.UTF_8))) {
+                    bw.write(responseBody);
+                  }
+                } catch (IOException | InterruptedException e) {
+                  console.logWarn("Failed to write anchore-engine vulnerabilities listing response to " + jenkinsAEResponseFP.getRemote(), e);
+                  throw new AbortException("Failed to write anchore-engine vulnerabilities listing response to " + jenkinsAEResponseFP.getRemote());
+                }
+
                 JSONObject responseJson = JSONObject.fromObject(responseBody);
                 JSONArray vulList = responseJson.getJSONArray("vulnerabilities");
                 for (int i = 0; i < vulList.size(); i++) {
@@ -545,7 +570,6 @@ public class BuildWorker {
         securityJson.put("data", dataJson);
 
         cveListingFileName = CVE_LISTING_PREFIX + JSON_FILE_EXTENSION;
-        FilePath jenkinsOutputDirFP = new FilePath(workspace, jenkinsOutputDirName);
         FilePath jenkinsQueryOutputFP = new FilePath(jenkinsOutputDirFP, cveListingFileName);
         try {
           console.logDebug("Writing vulnerability listing result to " + jenkinsQueryOutputFP.getRemote());
@@ -895,6 +919,15 @@ public class BuildWorker {
       console.logError("Failed to initialize Anchore workspace due to an unexpected error", e);
       throw new AbortException(
               "Failed to initialize Anchore workspace due to an unexpected error. Please refer to above logs for more information");
+    }
+  }
+
+    } catch (AbortException e) { // probably caught one of the thrown exceptions, let it pass through
+      throw e;
+    } catch (Exception e) { // caught unknown exception, console.log it and wrap it
+      console.logError("Failed to initialize Anchore workspace due to an unexpected error", e);
+      throw new AbortException(
+          "Failed to initialize Anchore workspace due to an unexpected error. Please refer to above logs for more information");
     }
   }
 
