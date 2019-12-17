@@ -922,15 +922,6 @@ public class BuildWorker {
     }
   }
 
-    } catch (AbortException e) { // probably caught one of the thrown exceptions, let it pass through
-      throw e;
-    } catch (Exception e) { // caught unknown exception, console.log it and wrap it
-      console.logError("Failed to initialize Anchore workspace due to an unexpected error", e);
-      throw new AbortException(
-          "Failed to initialize Anchore workspace due to an unexpected error. Please refer to above logs for more information");
-    }
-  }
-
   private JSONArray generateDataTablesColumnsForGateSummary() {
     JSONArray headers = new JSONArray();
     for (GATE_SUMMARY_COLUMN column : GATE_SUMMARY_COLUMN.values()) {
