@@ -96,25 +96,4 @@ public class BuildConfig {
     return engineverify;
   }
 
-  public void print(ConsoleLog consoleLog) {
-    consoleLog.logInfo("[global] debug: " + String.valueOf(debug));
-
-    // Global or build properties
-    consoleLog.logInfo("[build] engineurl: " + engineurl);
-    consoleLog.logInfo("[build] engineuser: " + engineuser);
-    consoleLog.logInfo("[build] enginepass: " + "****");
-    consoleLog.logInfo("[build] engineverify: " + String.valueOf(engineverify));
-
-    // Build properties
-    consoleLog.logInfo("[build] name: " + name);
-    consoleLog.logInfo("[build] engineRetries: " + engineRetries);
-    consoleLog.logInfo("[build] policyBundleId: " + policyBundleId);
-    if (null != annotations && !annotations.isEmpty()) {
-      for (Annotation a : annotations) {
-        consoleLog.logInfo("[build] annotation: " + a.getKey() + "=" + a.getValue());
-      }
-    }
-    consoleLog.logInfo("[build] bailOnFail: " + bailOnFail);
-    consoleLog.logInfo("[build] bailOnPluginFail: " + bailOnPluginFail);
-  }
 }

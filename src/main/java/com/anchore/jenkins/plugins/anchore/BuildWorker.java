@@ -145,9 +145,6 @@ public class BuildWorker {
       // Initialize analyzed flag to false to indicate that analysis step has not run
       this.analyzed = false;
 
-      // Print versions and build configuration
-      printConfig();
-
       // Check config
       checkConfig();
 
@@ -789,25 +786,6 @@ public class BuildWorker {
     } catch (RuntimeException e) { // caught unknown exception, log it
       console.logDebug("Failed to clean up build artifacts due to an unexpected error", e);
     }
-  }
-
-  /**
-   * Print versions info and configuration
-   */
-  private void printConfig() {
-    console.logInfo("Jenkins version: " + Jenkins.VERSION);
-    List<PluginWrapper> plugins;
-    if (Jenkins.getActiveInstance() != null && Jenkins.getActiveInstance().getPluginManager() != null
-            && (plugins = Jenkins.getActiveInstance().getPluginManager().getPlugins()) != null) {
-      for (PluginWrapper plugin : plugins) {
-        if (plugin.getShortName()
-                .equals("anchore-container-scanner")) { // artifact ID of the plugin, TODO is there a better way to get this
-          console.logInfo(plugin.getDisplayName() + " version: " + plugin.getVersion());
-          break;
-        }
-      }
-    }
-    config.print(console);
   }
 
   /**
