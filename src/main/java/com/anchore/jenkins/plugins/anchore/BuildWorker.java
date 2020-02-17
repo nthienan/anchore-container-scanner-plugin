@@ -335,7 +335,6 @@ public class BuildWorker {
   private GATE_ACTION runGatesEngine() throws AbortException {
     HttpClientContext context = makeHttpClientContext();
 
-    //Credentials defaultcreds = new UsernamePasswordCredentials(username, password);
     FilePath jenkinsOutputDirFP = new FilePath(workspace, jenkinsOutputDirName);
     FilePath jenkinsGatesOutputFP = new FilePath(jenkinsOutputDirFP, gateOutputFileName);
     int counter = 0;
@@ -386,14 +385,11 @@ public class BuildWorker {
                 continue;
               } else {
                 done = true;
-                String theurl =
-                        config.getEngineurl().replaceAll("/+$", "") + "/images/" + imageDigest + "/check?tag=" + tag + "&detail=true";
 
                 if (!Strings.isNullOrEmpty(config.getPolicyBundleId())) {
                   theurl += "&policyId=" + config.getPolicyBundleId();
                 }
                 console.logDebug("anchore-engine get policy evaluation URL: " + theurl);
-                HttpGet httpget = new HttpGet(theurl);
                 httpget.addHeader("Content-Type", "application/json");
                 try (CloseableHttpResponse response = httpclient.execute(httpget, context)) {
                   statusCode = response.getStatusLine().getStatusCode();
@@ -504,6 +500,9 @@ public class BuildWorker {
     if (analyzed) {
       HttpClientContext context = makeHttpClientContext();
       try {
+        FilePath jenkinsOutputDirFP = new FilePath(workspace, jenkinsOutputDirName);
+        int counter = 0;
+
         JSONObject securityJson = new JSONObject();
         JSONArray columnsJson = new JSONArray();
         for (String column : Arrays.asList("Tag", "CVE ID", "Severity", "Vulnerability Package", "Fix Available", "URL")) {
